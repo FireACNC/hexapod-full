@@ -16,7 +16,7 @@ class MyWindow(QMainWindow,Ui_client):
         self.setupUi(self)
         self.setWindowIcon(QIcon('Picture/logo_Mini.png'))
         self.Video.setScaledContents (True)
-        self.Video.setPixmap(QPixmap('Picture/Spider_client.png'))
+        # self.Video.setPixmap(QPixmap('Picture/Spider_client.png'))
 
         self.client=Client()
         file = open('IP.txt', 'r')
@@ -41,6 +41,10 @@ class MyWindow(QMainWindow,Ui_client):
         self.Button_Relax.clicked.connect(self.relax)
         self.Button_Buzzer.pressed.connect(self.buzzer)
         self.Button_Buzzer.released.connect(self.buzzer)
+
+        self.Button_StairClimb.clicked.connect(self.stairClimb)
+        self.Button_Run_Cmd.clicked.connect(self.debugRunCmd)
+        self.debug_console.setText("")
 
         #Slider
         self.slider_head.setMinimum(50)
@@ -138,6 +142,10 @@ class MyWindow(QMainWindow,Ui_client):
         if (event.key() == Qt.Key_Y):
             print("Y")
             self.buzzer()
+
+        if (event.key() == Qt.Key_C):
+            print("C")
+            self.stairClimb()
 
         if event.isAutoRepeat():
             pass
@@ -403,6 +411,18 @@ class MyWindow(QMainWindow,Ui_client):
             self.client.send_data(command)
         except Exception as e:
             print(e)
+
+    def stairClimb(self):
+        try:
+            command = cmd.CMD_STAIR + '\n'
+            print(command)
+            self.client.send_data(command)
+        except Exception as e:
+            print(e)
+    def debugRunCmd(self):   
+        cmd = self.debug_console.text() + "\n"
+        self.client.send_data(cmd)
+
     def relax(self):
         try:
             if self.Button_Relax.text() == "Relax":

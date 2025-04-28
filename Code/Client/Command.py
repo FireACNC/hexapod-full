@@ -13,5 +13,14 @@ class COMMAND:
     CMD_CALIBRATION = "CMD_CALIBRATION"
     CMD_CAMERA = "CMD_CAMERA"
     CMD_SERVOPOWER = "CMD_SERVOPOWER"
+
+    CMD_STAIR = "CMD_STAIR"
+    CMD_PAIR_MOVE = "CMD_PAIR_MOVE"
     def __init__(self):
         pass
+
+
+'''
+CMD_PAIR_MOVE#2#0#0#80
+
+'''

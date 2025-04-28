@@ -12,6 +12,10 @@ from Thread import *
 import multiprocessing
 from PIL import Image, ImageDraw
 from Command import COMMAND as cmd
+from pet import GestureDetector
+
+CMD_QUEUE_WAIT_TIME = 20
+
 class Client:
     def __init__(self):
         self.face=Face()
@@ -21,6 +25,10 @@ class Client:
         self.fece_id=False
         self.fece_recognition_flag = False
         self.image=''
+        self.detector = GestureDetector(self)
+
+        self.cmd_queue_counter = CMD_QUEUE_WAIT_TIME
+        self.cmd_queue = []
     def turn_on_client(self,ip):
         self.client_socket1 = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -59,9 +67,18 @@ class Client:
                 if self.is_valid_image_4_bytes(jpg):
                     if self.video_flag:
                         self.image = cv2.imdecode(np.frombuffer(jpg, dtype=np.uint8), cv2.IMREAD_COLOR)
-                        if self.fece_id == False and self.fece_recognition_flag:
-                            self.face.face_detect(self.image)
+                        # if self.fece_id == False and self.fece_recognition_flag:
+                        #     self.face.face_detect(self.image)
                         self.video_flag=False
+
+                        self.detector.process_frame(self.image)
+                        if self.cmd_queue_counter > 0: self.cmd_queue_counter -= 1
+                        if self.cmd_queue_counter <= 0 and len(self.cmd_queue) != 0:
+                            print(self.cmd_queue)
+                            cmd = self.cmd_queue.pop(0)
+                            self.send_data(cmd)
+                            self.cmd_queue_counter = CMD_QUEUE_WAIT_TIME
+
             except BaseException as e:
                 print (e)
                 break
