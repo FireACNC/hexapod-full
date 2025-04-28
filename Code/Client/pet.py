@@ -4,7 +4,42 @@ import numpy as np
 from Command import COMMAND as cmd
 
 READ_INTERVAL = 10
+RECOG_BUFFER_COUNTS = 1
 
+class Motion:
+    SPIN = 1
+    FORWARD = 2
+    BACKWARD = 3
+
+    def __init__(self):
+        pass
+
+    def halt(self):
+        end_command = cmd.CMD_MOVE+ "#1#0#0#0#0\n"
+        return [end_command]
+
+    def spin(self):
+        command = cmd.CMD_MOVE+ "#1#2#0#8#15\n"
+        return [command] * 7
+    
+    def move_forward(self):
+        command = cmd.CMD_MOVE+ "#1#0#20#15#0\n"
+        return [command]
+    
+    def move_backward(self):
+        command = cmd.CMD_MOVE+ "#1#0#-20#8#0\n"
+        return [command]
+    
+    def gen_action_cmd_queue(self, action):
+        assert(action != None)
+
+        if action == self.SPIN:
+            return self.spin()
+        elif action == self.FORWARD:
+            return self.move_forward()
+        elif action == self.BACKWARD:
+            return self.move_backward()
+        
 class GestureDetector:
     def __init__(self, client):
         self.mp_pose = mp.solutions.pose
@@ -15,7 +50,12 @@ class GestureDetector:
         self.client = client
 
         self.fram_counter = READ_INTERVAL
-        self.spin_counter = 0
+        self.recog_buffer_counter = 0
+        self.action = None
+        self.prev_action = None
+        self.halted = True
+
+        self.motion = Motion()
 
     def process_frame(self, frame):
         self.fram_counter -= 1
@@ -46,53 +86,68 @@ class GestureDetector:
             self.mp_drawing.draw_landmarks(frame, pose_results.pose_landmarks, self.mp_pose.POSE_CONNECTIONS)
 
         if hand_results.multi_hand_landmarks:
-            for hand_landmarks in hand_results.multi_hand_landmarks:
-                landmarks = hand_landmarks.landmark
+            hand_landmarks = hand_results.multi_hand_landmarks[0]
+            landmarks = hand_landmarks.landmark
 
-                wrist = landmarks[0]
-                index_tip = landmarks[8]
-                middle_tip = landmarks[12]
-                ring_tip = landmarks[16]
-                pinky_tip = landmarks[20]
+            wrist = landmarks[0]
+            index_tip = landmarks[8]
+            middle_tip = landmarks[12]
+            ring_tip = landmarks[16]
+            pinky_tip = landmarks[20]
 
-                def get_finger_direction(tip, base):
-                    dx = tip.x - base.x
-                    dy = tip.y - base.y
-                    return np.arctan2(dy, dx) * 180 / np.pi
+            def get_finger_direction(tip, base):
+                dx = tip.x - base.x
+                dy = tip.y - base.y
+                return np.arctan2(dy, dx) * 180 / np.pi
 
-                index_angle = get_finger_direction(index_tip, landmarks[6])
+            index_angle = get_finger_direction(index_tip, landmarks[6])
 
 
-                # Gesture 1: Index finger pointing down
-                if (
-                    index_tip.y > wrist.y and  # Index is below wrist
-                    all(index_tip.y > landmarks[i].y for i in [12, 16, 20]) and
-                    abs(index_angle - 90) < 45
-                ):
-                    print("Gesture detected: Spin (Index pointing down)")
-                    self.spin_counter += 1
+            # Gesture 1: Index finger pointing down
+            if (
+                index_tip.y > wrist.y and  # Index is below wrist
+                all(index_tip.y > landmarks[i].y for i in [12, 16, 20]) and
+                abs(index_angle - 90) < 45
+            ):
+                print("Gesture detected: Spin")
+                self.action = Motion.SPIN
 
-                    if self.spin_counter >= 2:
-                        command = cmd.CMD_MOVE+ "#1#2#0#8#15\n"
-                        end_command = cmd.CMD_MOVE+ "#1#0#0#0#0\n"
-                        self.client.cmd_queue = [command] * 7 + [end_command]
+            # Gesture 2: Open palm, fingers pointing up
+            elif (
+                all(landmarks[i].y < wrist.y for i in [8, 12, 16, 20]) and
+                landmarks[8].y < landmarks[6].y and
+                landmarks[12].y < landmarks[10].y
+            ):
+                print("Gesture detected: Come")
+                self.action = Motion.FORWARD
 
-                else: 
-                    self.spin_counter = 0
-                    # Gesture 2: Open palm, fingers pointing up
-                    if (
-                        all(landmarks[i].y < wrist.y for i in [8, 12, 16, 20]) and
-                        landmarks[8].y < landmarks[6].y and
-                        landmarks[12].y < landmarks[10].y
-                    ):
-                        print("Gesture detected: Come (Palm open, fingers up)")
+            # Gesture 3: Open palm, fingers pointing down
+            elif (
+                all(landmarks[i].y > wrist.y for i in [8, 12, 16, 20]) and
+                landmarks[8].y > landmarks[6].y and
+                landmarks[12].y > landmarks[10].y
+            ):
+                print("Gesture detected: Go")
+                self.action = Motion.BACKWARD
 
-                    # Gesture 3: Open palm, fingers pointing down
-                    elif (
-                        all(landmarks[i].y > wrist.y for i in [8, 12, 16, 20]) and
-                        landmarks[8].y > landmarks[6].y and
-                        landmarks[12].y > landmarks[10].y
-                    ):
-                        print("Gesture detected: Go (Palm open, fingers down)")
+            else:
+                self.action = None
 
-                self.mp_drawing.draw_landmarks(frame, hand_landmarks, self.mp_hands.HAND_CONNECTIONS)
+            if self.recog_buffer_counter > RECOG_BUFFER_COUNTS and self.action != None:
+                self.halted = False
+                self.client.cmd_queue = self.motion.gen_action_cmd_queue(self.action)
+            
+            # self.mp_drawing.draw_landmarks(frame, hand_landmarks, self.mp_hands.HAND_CONNECTIONS)
+        else:
+            self.action = None
+
+        print("recog buffer:", self.recog_buffer_counter)
+        if self.action != None and self.action == self.prev_action:
+            self.recog_buffer_counter += 1
+        else:
+            self.recog_buffer_counter = 0
+            if not self.halted:
+                print("Halting")
+                self.client.cmd_queue.extend(self.motion.halt())
+                self.halted = True
+        self.prev_action = self.action

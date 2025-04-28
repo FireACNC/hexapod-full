@@ -13,6 +13,7 @@ import multiprocessing
 from PIL import Image, ImageDraw
 from Command import COMMAND as cmd
 from pet import GestureDetector
+import traceback
 
 CMD_QUEUE_WAIT_TIME = 20
 
@@ -79,8 +80,9 @@ class Client:
                             self.send_data(cmd)
                             self.cmd_queue_counter = CMD_QUEUE_WAIT_TIME
 
-            except BaseException as e:
-                print (e)
+            except BaseException:
+                print("\n\n****EXCEPTION RAISED****\n\n")
+                traceback.print_exc()
                 break
     def send_data(self,data):
         if self.tcp_flag:
