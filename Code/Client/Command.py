@@ -18,9 +18,3 @@ class COMMAND:
     CMD_PAIR_MOVE = "CMD_PAIR_MOVE"
     def __init__(self):
         pass
-
-
-'''
-CMD_PAIR_MOVE#2#0#0#80
-
-'''
