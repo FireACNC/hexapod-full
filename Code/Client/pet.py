@@ -3,7 +3,7 @@ import mediapipe as mp
 import numpy as np
 from Command import COMMAND as cmd
 
-READ_INTERVAL = 10
+READ_INTERVAL = 3
 RECOG_BUFFER_COUNTS = 1
 
 CAM_CENTER = (200, 160)
@@ -12,7 +12,7 @@ FOCAL_LENGTH = 410
 
 HEAD_X_MAX = 150
 HEAD_X_MIN = 30
-HEAD_Y_MAX = 150
+HEAD_Y_MAX = 170
 HEAD_Y_MIN = 90
 
 ROTATE_THRESHOLD = 5
@@ -34,7 +34,7 @@ class Motion:
         return [command] * 7
     
     def move_forward(self):
-        command = cmd.CMD_MOVE+ "#1#0#20#15#0\n"
+        command = cmd.CMD_MOVE+ "#1#0#20#9#0\n"
         return [command]
     
     def move_backward(self):
@@ -65,7 +65,8 @@ class Motion:
 
     def rotate_body(self, delta_angle):
         print(f"Rotating body by {delta_angle:.2f} degrees.")
-        return []
+        command = cmd.CMD_MOVE+ f"#1#2#0#8#{max(int(delta_angle), 15)}\n"
+        return [command] + self.halt()
         
     def control_robot_head_and_body(self, face_x, face_y, face_depth_cm, bbox_width_pixels):
         commands = []
@@ -176,29 +177,28 @@ class GestureDetector:
 
             # Gesture 2: Open palm, fingers pointing up
             elif (
-                all(landmarks[i].y < wrist.y for i in [8, 12, 16, 20]) and
-                landmarks[8].y < landmarks[6].y and
-                landmarks[12].y < landmarks[10].y
+                all(landmarks[i].y < wrist.y for i in [8, 12, 16, 20]) 
+                # and
+                # landmarks[8].y < landmarks[6].y and
+                # landmarks[12].y < landmarks[10].y
             ):
                 print("Gesture detected: Come")
                 self.action = Motion.FORWARD
 
             # Gesture 3: Open palm, fingers pointing down
             elif (
-                all(landmarks[i].y > wrist.y for i in [8, 12, 16, 20]) and
-                landmarks[8].y > landmarks[6].y and
-                landmarks[12].y > landmarks[10].y
+                all(landmarks[i].y > wrist.y for i in [8, 12, 16, 20]) 
+                # and
+                # landmarks[8].y > landmarks[6].y and
+                # landmarks[12].y > landmarks[10].y
             ):
                 print("Gesture detected: Go")
                 self.action = Motion.BACKWARD
 
             else:
+                print("No Gesture recorded.")
                 self.action = None
 
-            if self.recog_buffer_counter > RECOG_BUFFER_COUNTS and self.action != None:
-                self.halted = False
-                self.client.cmd_queue = self.motion.gen_action_cmd_queue(self.action)
-            
             # self.mp_drawing.draw_landmarks(frame, hand_landmarks, self.mp_hands.HAND_CONNECTIONS)
         else:
             self.action = None
@@ -211,4 +211,9 @@ class GestureDetector:
                 print("Halting")
                 self.client.cmd_queue.extend(self.motion.halt())
                 self.halted = True
+        
+        if self.recog_buffer_counter > RECOG_BUFFER_COUNTS:
+            self.halted = False
+            self.client.cmd_queue = self.motion.gen_action_cmd_queue(self.action)
+            
         self.prev_action = self.action

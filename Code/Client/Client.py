@@ -74,10 +74,13 @@ class Client:
 
                         self.detector.process_frame(self.image)
                         if self.cmd_queue_counter > 0: self.cmd_queue_counter -= 1
-                        if self.cmd_queue_counter <= 0 and len(self.cmd_queue) != 0:
+                        if len(self.cmd_queue) != 0 and (
+                            self.cmd_queue_counter <= 0 or
+                            not self.cmd_queue[0].startswith(cmd.CMD_MOVE)
+                        ):
                             print(self.cmd_queue)
-                            cmd = self.cmd_queue.pop(0)
-                            self.send_data(cmd)
+                            command = self.cmd_queue.pop(0)
+                            self.send_data(command)
                             self.cmd_queue_counter = CMD_QUEUE_WAIT_TIME
 
             except BaseException:
