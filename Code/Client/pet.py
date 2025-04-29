@@ -6,6 +6,17 @@ from Command import COMMAND as cmd
 READ_INTERVAL = 10
 RECOG_BUFFER_COUNTS = 1
 
+CAM_CENTER = (200, 160)
+REAL_FACE_WIDTH = 15
+FOCAL_LENGTH = 410
+
+HEAD_X_MAX = 150
+HEAD_X_MIN = 30
+HEAD_Y_MAX = 150
+HEAD_Y_MIN = 90
+
+ROTATE_THRESHOLD = 5
+
 class Motion:
     SPIN = 1
     FORWARD = 2
@@ -40,13 +51,64 @@ class Motion:
         elif action == self.BACKWARD:
             return self.move_backward()
         
+    def move_head_x(self, target_head_x):
+        print(f"Moving heax X to {target_head_x:.2f} degrees.")
+        command = cmd.CMD_HEAD + f"#1#{int(target_head_x)}\n"
+        self.current_head_x = target_head_x
+        return [command]
+
+    def move_head_y(self, target_head_y):
+        print(f"Moving head Y to {target_head_y:.2f} degrees.")
+        command = cmd.CMD_HEAD + f"#0#{int(target_head_y)}\n"
+        self.current_head_y = target_head_y
+        return [command]
+
+    def rotate_body(self, delta_angle):
+        print(f"Rotating body by {delta_angle:.2f} degrees.")
+        return []
+        
+    def control_robot_head_and_body(self, face_x, face_y, face_depth_cm, bbox_width_pixels):
+        commands = []
+        error_x_pixels = CAM_CENTER[0] - face_x
+        error_y_pixels = CAM_CENTER[1] - face_y
+        
+        # Step 2: convert pixel error to cm
+        pixel_to_cm = REAL_FACE_WIDTH / bbox_width_pixels
+        error_x_cm = error_x_pixels * pixel_to_cm
+        error_y_cm = error_y_pixels * pixel_to_cm
+
+        # Step 3: calculate desired angle error (in degrees)
+        angle_x = np.degrees(np.arctan2(error_x_cm, face_depth_cm))
+        angle_y = np.degrees(np.arctan2(error_y_cm, face_depth_cm))
+
+        target_head_x = self.current_head_x + angle_x
+        target_head_y = self.current_head_y + angle_y
+
+        print(f"Desired target head angles - X: {target_head_x:.2f}°, Y: {target_head_y:.2f}°")
+
+        if HEAD_X_MIN <= target_head_x <= HEAD_X_MAX:
+            if abs(angle_x) >= ROTATE_THRESHOLD:
+                commands.extend(self.move_head_x(target_head_x))
+        else:
+            commands.extend(self.rotate_body(angle_x))
+
+        if HEAD_Y_MIN <= target_head_y <= HEAD_Y_MAX:
+            if abs(angle_y) >= ROTATE_THRESHOLD:
+                commands.extend(self.move_head_y(target_head_y))
+        else:
+            print("Y angle too large, ignoring head Y movement.")
+
+        return commands
+        
 class GestureDetector:
     def __init__(self, client):
-        self.mp_pose = mp.solutions.pose
+        self.mp_face_detection = mp.solutions.face_detection
+        self.face_detection = self.mp_face_detection.FaceDetection(min_detection_confidence=0.7)
+    
         self.mp_hands = mp.solutions.hands
-        self.mp_drawing = mp.solutions.drawing_utils
-        self.pose = self.mp_pose.Pose()
         self.hands = self.mp_hands.Hands(max_num_hands=1, min_detection_confidence=0.7)
+        
+        # self.mp_drawing = mp.solutions.drawing_utils
         self.client = client
 
         self.fram_counter = READ_INTERVAL
@@ -55,35 +117,35 @@ class GestureDetector:
         self.prev_action = None
         self.halted = True
 
-        self.motion = Motion()
+        self.motion = None
 
     def process_frame(self, frame):
         self.fram_counter -= 1
         if self.fram_counter >= 0: return
+        if self.motion is None:
+            self.motion = Motion()
+            self.client.cmd_queue = self.motion.move_head_x(90) + self.motion.move_head_y(140)
         self.fram_counter = READ_INTERVAL
 
         h, w, _ = frame.shape
         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
-        pose_results = self.pose.process(frame_rgb)
+        face_results = self.face_detection.process(frame_rgb)
         hand_results = self.hands.process(frame_rgb)
 
-        if pose_results.pose_landmarks:
-            landmarks = pose_results.pose_landmarks.landmark
-            y_coords = [lm.y for lm in landmarks]
-            x_coords = [lm.x for lm in landmarks]
+        if face_results.detections:
+            for detection in face_results.detections:
+                bbox = detection.location_data.relative_bounding_box
+                bbox_width = bbox.width * w  # face width in pixels
+                bbox_height = bbox.height * h  # face height in pixels
+                x_center = int((bbox.xmin + bbox.width / 2) * w)
+                y_center = int((bbox.ymin + bbox.height / 2) * h)
 
-            min_y = min(y_coords) * h
-            max_y = max(y_coords) * h
-            min_x = min(x_coords) * w
-            max_x = max(x_coords) * w
-
-            body_height = int(max_y - min_y)
-            body_position = (int((min_x + max_x) / 2), int((min_y + max_y) / 2))
-
-            print(f"Body detected: Height = {body_height}px, Position = {body_position}")
-
-            self.mp_drawing.draw_landmarks(frame, pose_results.pose_landmarks, self.mp_pose.POSE_CONNECTIONS)
+                if bbox_width > 0:
+                    distance_cm = (REAL_FACE_WIDTH * FOCAL_LENGTH) / bbox_width
+                    print(f"Face at ({x_center}, {y_center}), width {bbox_width}, estimated distance: {distance_cm:.2f} cm")
+                    if self.client.cmd_queue == []:
+                        self.client.cmd_queue = self.motion.control_robot_head_and_body(x_center, y_center, distance_cm, bbox_width)
 
         if hand_results.multi_hand_landmarks:
             hand_landmarks = hand_results.multi_hand_landmarks[0]
@@ -141,7 +203,6 @@ class GestureDetector:
         else:
             self.action = None
 
-        print("recog buffer:", self.recog_buffer_counter)
         if self.action != None and self.action == self.prev_action:
             self.recog_buffer_counter += 1
         else:
